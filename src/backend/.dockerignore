@@ -1,0 +1,112 @@
+**/__pycache__
+**/*.py[cod]
+
+# Version control
+.git/
+.gitignore
+
+# Environment and secrets
+.env*
+.env.development
+.env.staging
+.env.production
+
+# Test files and coverage
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Logs
+*.log
+logs/
+
+# Documentation
+docs/
+*.md
+CHANGELOG
+LICENSE
+
+# Docker files
+docker-compose*.yml
+.dockerignore
+Dockerfile
+
+# Development artifacts
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# IDE settings
+.vscode/
+.idea/
+*.sublime-*
+
+# Editor temporary files
+**/*.swp
+**/*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+.python-version
+
+# Dependency management
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Mypy cache
+.mypy_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Local development
+local/
+tmp/
+temp/
+
+# Profiling data
+*.prof
+*.pstat
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Compiled translations
+*.mo
+*.pot
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Redis dump
+dump.rdb
+
+# Kubernetes
+k8s/
+manifests/
+charts/
