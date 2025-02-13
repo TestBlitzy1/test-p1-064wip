@@ -1,0 +1,35 @@
+# They will be requested for review when someone opens a pull request
+* @organization/platform-admins
+
+# Backend service owners
+/src/backend/ @organization/backend-team
+
+# Frontend/Web application owners  
+/src/web/ @organization/frontend-team
+
+# Test directory owners
+/src/test/ @organization/qa-team
+
+# Infrastructure configuration owners
+/infrastructure/ @organization/devops-team
+
+# Specialized service owners
+/src/backend/ai_service/ @organization/ai-team @organization/backend-team
+/src/backend/analytics_service/ @organization/analytics-team @organization/backend-team
+/src/backend/integration_service/ @organization/integration-team @organization/backend-team
+
+# Infrastructure as code files require both DevOps and Security review
+*.tf @organization/devops-team @organization/security-team
+
+# Kubernetes/Docker configuration files
+*.yaml @organization/devops-team
+
+# Package dependency files require security review
+package.json @organization/frontend-team @organization/security-team
+requirements.txt @organization/backend-team @organization/security-team
+
+# Security-critical components require security team review
+/src/backend/common/security/ @organization/security-team @organization/backend-team
+
+# CI/CD workflow configurations require both DevOps and Security review
+.github/workflows/ @organization/devops-team @organization/security-team
