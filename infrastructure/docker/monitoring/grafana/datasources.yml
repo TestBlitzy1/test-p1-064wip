@@ -1,0 +1,72 @@
+# Grafana datasources configuration for Sales Intelligence Platform
+# Version: grafana/grafana:9.5.0
+
+apiVersion: 1
+
+# List of data sources to be provisioned
+datasources:
+  # Prometheus metrics datasource
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    version: 1
+    editable: false
+    jsonData:
+      # Sync with Prometheus scrape interval from prometheus.yml
+      timeInterval: "15s"
+      queryTimeout: "30s"
+      httpMethod: "POST"
+      # Enable exemplar support for trace correlation
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger
+      # Enhanced query performance settings
+      prometheusType: Prometheus
+      prometheusVersion: 2.45.0
+      cacheLevel: "High"
+      disableRecordingRules: false
+      incrementalQueryOverlapWindow: "10m"
+      # Security settings
+      tlsAuth: false
+      tlsSkipVerify: false
+      httpHeaderName1: "X-Scope-OrgID"
+    secureJsonData:
+      httpHeaderValue1: "${GRAFANA_ORG_ID}"
+
+  # Jaeger tracing datasource
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    isDefault: false
+    version: 1
+    editable: false
+    jsonData:
+      # Enable node graph visualization
+      nodeGraph:
+        enabled: true
+      # Trace to logs configuration
+      tracesToLogs:
+        datasourceUid: prometheus
+        tags: ["job", "instance", "pod", "namespace"]
+        mappedTags: [
+          { key: "service.name", value: "job" },
+          { key: "k8s.pod.name", value: "pod" }
+        ]
+      # Search configuration
+      search:
+        maxLookback: "24h"
+        maxLimit: 1000
+      # Span bar configuration  
+      spanBar:
+        type: "duration"
+        colors:
+          threshold:
+            - value: 0
+              color: "green"
+            - value: 0.5
+              color: "yellow" 
+            - value: 1
+              color: "red"
