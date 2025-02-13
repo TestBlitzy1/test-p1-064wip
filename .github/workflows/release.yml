@@ -1,0 +1,228 @@
+name: Release Management
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (semver format)'
+        required: true
+        type: string
+      deployment_type:
+        description: 'Deployment type (canary/blue-green)'
+        required: true
+        type: choice
+        options:
+          - canary
+          - blue-green
+        default: 'canary'
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  DOCKER_REGISTRY: ${{ secrets.DOCKER_REGISTRY }}
+  SECONDARY_AWS_REGION: ${{ secrets.SECONDARY_AWS_REGION }}
+  DEPLOYMENT_ROLE_ARN: ${{ secrets.DEPLOYMENT_ROLE_ARN }}
+
+jobs:
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release_info.outputs.version }}
+      changelog: ${{ steps.release_info.outputs.changelog }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: next-build
+          path: artifacts/frontend
+
+      - name: Download backend artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: backend-build
+          path: artifacts/backend
+
+      - name: Download security scan results
+        uses: actions/download-artifact@v3
+        with:
+          name: security_scan_results
+          path: artifacts/security
+
+      - name: Validate security scan results
+        run: |
+          if grep -q "CRITICAL" artifacts/security/scan-results.json; then
+            echo "Critical security vulnerabilities found!"
+            exit 1
+          fi
+
+      - name: Generate release info
+        id: release_info
+        uses: release-drafter/release-drafter@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-name: release-drafter.yml
+          version: ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Prepare deployment manifests
+        run: |
+          # Generate Kubernetes manifests with version tags
+          VERSION=${{ steps.release_info.outputs.version }}
+          
+          # Update image tags in manifests
+          sed -i "s/latest/${VERSION}/g" k8s/production/*.yaml
+          
+          # Generate canary manifests if needed
+          if [[ "${{ github.event.inputs.deployment_type }}" == "canary" ]]; then
+            cp k8s/production/deployment.yaml k8s/production/canary.yaml
+            sed -i "s/replicas: 3/replicas: 1/" k8s/production/canary.yaml
+            sed -i "s/weight: 100/weight: 10/" k8s/production/canary.yaml
+          fi
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-artifacts
+          path: |
+            artifacts/
+            k8s/production/
+            CHANGELOG.md
+          retention-days: 7
+
+  deploy-primary:
+    name: Deploy to Primary Region
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOYMENT_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: release-artifacts
+          path: .
+
+      - name: Deploy to EKS
+        run: |
+          VERSION=${{ needs.prepare.outputs.version }}
+          DEPLOY_TYPE=${{ github.event.inputs.deployment_type }}
+          
+          # Update kubeconfig
+          aws eks update-kubeconfig --name production-cluster --region ${AWS_REGION}
+          
+          if [[ "$DEPLOY_TYPE" == "canary" ]]; then
+            # Deploy canary version
+            kubectl apply -f k8s/production/canary.yaml
+            
+            # Monitor canary health
+            for i in {1..6}; do
+              sleep 300
+              if ! kubectl rollout status deployment/app-canary; then
+                kubectl rollout undo deployment/app-canary
+                exit 1
+              fi
+              # Increase traffic gradually
+              WEIGHT=$((i * 20))
+              kubectl patch svc app-service -p "{\"spec\":{\"trafficPolicy\":{\"canary\":{\"weight\":${WEIGHT}}}}}"
+            done
+            
+            # Promote canary to stable
+            kubectl apply -f k8s/production/deployment.yaml
+          else
+            # Blue-green deployment
+            kubectl apply -f k8s/production/deployment.yaml
+            kubectl rollout status deployment/app
+          fi
+
+      - name: Verify deployment
+        run: |
+          # Health check endpoints
+          for i in {1..10}; do
+            curl -f https://api.production.com/health || exit 1
+            sleep 30
+          done
+
+  deploy-secondary:
+    name: Deploy to Secondary Region
+    needs: [prepare, deploy-primary]
+    runs-on: ubuntu-latest
+    environment: production-dr
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOYMENT_ROLE_ARN }}
+          aws-region: ${{ env.SECONDARY_AWS_REGION }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: release-artifacts
+          path: .
+
+      - name: Deploy to Secondary Region
+        run: |
+          # Update kubeconfig for secondary region
+          aws eks update-kubeconfig --name production-dr-cluster --region ${SECONDARY_AWS_REGION}
+          
+          # Deploy to secondary region
+          kubectl apply -f k8s/production/deployment.yaml
+          kubectl rollout status deployment/app
+
+      - name: Verify cross-region replication
+        run: |
+          # Verify data consistency
+          for i in {1..5}; do
+            curl -f https://api-dr.production.com/health || exit 1
+            sleep 30
+          done
+
+  finalize:
+    name: Finalize Release
+    needs: [prepare, deploy-primary, deploy-secondary]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Create GitHub Release
+        uses: release-drafter/release-drafter@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          version: ${{ needs.prepare.outputs.version }}
+          publish: true
+
+      - name: Update documentation
+        run: |
+          # Update version numbers in docs
+          VERSION=${{ needs.prepare.outputs.version }}
+          echo "Released version ${VERSION}" >> RELEASES.md
+          echo "${{ needs.prepare.outputs.changelog }}" >> RELEASES.md
+
+      - name: Notify stakeholders
+        if: success()
+        run: |
+          curl -X POST ${SLACK_WEBHOOK_URL} \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "Successfully released version ${{ needs.prepare.outputs.version }} to production"
+            }'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
