@@ -1,0 +1,93 @@
+# Prometheus server configuration for Sales Intelligence Platform
+# Version: prom/prometheus:v2.45.0
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    environment: ${ENV:prod}
+    region: ${REGION:us-east-1}
+    app: sales-intelligence-platform
+
+# Rule files for recording and alerting
+rule_files:
+  - /etc/prometheus/rules/recording_rules.yml
+  - /etc/prometheus/rules/alerting_rules.yml
+  - /etc/prometheus/rules/service_slos.yml
+
+# Scrape configurations for all services
+scrape_configs:
+  # Kubernetes pod auto-discovery
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: 
+            - default
+            - monitoring
+            - services
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+
+  # Campaign Service monitoring
+  - job_name: campaign-service
+    metrics_path: /metrics
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['campaign-service:8080']
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: campaign_.*
+        action: keep
+
+  # Analytics Service monitoring
+  - job_name: analytics-service
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['analytics-service:8081']
+
+  # AI Service monitoring
+  - job_name: ai-service
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['ai-service:8082']
+
+  # Audience Service monitoring
+  - job_name: audience-service
+    metrics_path: /metrics
+    scrape_interval: 20s
+    static_configs:
+      - targets: ['audience-service:8083']
+
+  # Monitoring stack services
+  - job_name: monitoring-services
+    metrics_path: /metrics
+    scrape_interval: 30s
+    static_configs:
+      - targets: 
+        - 'grafana:3000'
+        - 'jaeger:14269'
+        - 'alertmanager:9093'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+      timeout: 5s
+      api_version: v2
