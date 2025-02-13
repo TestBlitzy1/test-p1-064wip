@@ -1,0 +1,67 @@
+# Kubernetes service configuration for Jaeger distributed tracing system
+# Version: kubernetes v1.27+
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels:
+    app: jaeger
+    component: tracing
+    part-of: sales-intelligence-platform
+    managed-by: kubernetes
+  annotations:
+    description: "Jaeger distributed tracing service endpoints"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "14269"
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "3600"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-protocol: "HTTP"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-port: "14269"
+
+spec:
+  type: ClusterIP
+  selector:
+    app: jaeger
+    component: tracing
+  ports:
+    # UI and API endpoint
+    - name: query
+      port: 16686
+      targetPort: 16686
+      protocol: TCP
+
+    # gRPC collector endpoint for receiving spans
+    - name: collector
+      port: 14250
+      targetPort: 14250
+      protocol: TCP
+
+    # Agent endpoint for receiving spans via UDP
+    - name: agent
+      port: 6831
+      targetPort: 6831
+      protocol: UDP
+
+    # Admin endpoint for metrics and health checks
+    - name: admin
+      port: 14269
+      targetPort: 14269
+      protocol: TCP
+
+    # Zipkin compatibility endpoint
+    - name: zipkin
+      port: 9411
+      targetPort: 9411
+      protocol: TCP
+
+  # Enable session affinity for consistent routing
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hour timeout
+
+  # Ensure proper load distribution
+  externalTrafficPolicy: Local
