@@ -1,0 +1,382 @@
+{
+  "info": {
+    "name": "Sales Intelligence Platform API Tests",
+    "description": "Comprehensive API test suite for validating Sales Intelligence Platform functionality across environments",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "{{baseUrl}}",
+      "type": "string"
+    },
+    {
+      "key": "apiVersion",
+      "value": "{{apiVersion}}",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global pre-request script for authentication and setup",
+          "if (!pm.environment.get('authToken')) {",
+          "    console.log('No auth token found - will be generated in auth requests');",
+          "}",
+          "",
+          "// Set common headers",
+          "pm.request.headers.add({",
+          "    key: 'Content-Type',",
+          "    value: 'application/json'",
+          "});",
+          "",
+          "// Add rate limit tracking",
+          "if (pm.environment.get('rateLimitRemaining')) {",
+          "    console.log(`Rate limit remaining: ${pm.environment.get('rateLimitRemaining')}`);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains valid JWT token', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.token).to.be.a('string');",
+                  "    pm.expect(jsonData.token.split('.')).to.have.lengthOf(3);",
+                  "    pm.environment.set('authToken', jsonData.token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"{{userEmail}}\",\n    \"password\": \"{{userPassword}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('New token is valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.token).to.be.a('string');",
+                  "    pm.environment.set('authToken', jsonData.token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/auth/refresh"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Campaign Management",
+      "item": [
+        {
+          "name": "Create Campaign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Campaign structure is valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.id).to.be.a('string');",
+                  "    pm.expect(jsonData.name).to.be.a('string');",
+                  "    pm.expect(jsonData.platform).to.be.oneOf(['linkedin', 'google']);",
+                  "    pm.expect(jsonData.budget).to.be.a('number');",
+                  "    pm.expect(jsonData.status).to.equal('draft');",
+                  "});",
+                  "",
+                  "pm.test('Rate limits are respected', function() {",
+                  "    pm.expect(pm.response.headers.get('X-RateLimit-Remaining')).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/campaigns",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"B2B SaaS Campaign Q4\",\n    \"platform\": \"linkedin\",\n    \"budget\": 5000,\n    \"duration\": 30,\n    \"targeting\": {\n        \"industries\": [\"Technology\", \"SaaS\"],\n        \"companySize\": [\"50-200\", \"201-500\"],\n        \"jobTitles\": [\"CTO\", \"VP Engineering\"],\n        \"locations\": [\"United States\", \"Canada\"]\n    }\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Campaign Performance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Performance metrics are valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.metrics).to.be.an('object');",
+                  "    pm.expect(jsonData.metrics.impressions).to.be.a('number');",
+                  "    pm.expect(jsonData.metrics.clicks).to.be.a('number');",
+                  "    pm.expect(jsonData.metrics.conversions).to.be.a('number');",
+                  "    pm.expect(jsonData.metrics.spend).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/campaigns/{{campaignId}}/performance"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audience Management",
+      "item": [
+        {
+          "name": "Create Audience Segment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Audience segment is valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.id).to.be.a('string');",
+                  "    pm.expect(jsonData.name).to.be.a('string');",
+                  "    pm.expect(jsonData.criteria).to.be.an('object');",
+                  "    pm.expect(jsonData.estimatedReach).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/audience/segments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Enterprise Tech Decision Makers\",\n    \"criteria\": {\n        \"industries\": [\"Technology\", \"Software\"],\n        \"companySize\": [\"1001-5000\", \"5000+\"],\n        \"jobLevel\": [\"Director\", \"VP\", \"C-Suite\"],\n        \"interests\": [\"Enterprise Software\", \"Digital Transformation\"]\n    }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "Get Campaign Analytics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Analytics data is valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.timeRange).to.be.an('object');",
+                  "    pm.expect(jsonData.metrics).to.be.an('object');",
+                  "    pm.expect(jsonData.segments).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/{{apiVersion}}/analytics/campaigns/{{campaignId}}",
+              "query": [
+                {
+                  "key": "timeRange",
+                  "value": "30d"
+                },
+                {
+                  "key": "metrics",
+                  "value": "impressions,clicks,conversions,spend"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "AI Services",
+      "item": [
+        {
+          "name": "Generate Ad Copy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Generated ad copy is valid', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.variations).to.be.an('array');",
+                  "    pm.expect(jsonData.variations).to.have.lengthOf.at.least(3);",
+                  "    jsonData.variations.forEach(function(variation) {",
+                  "        pm.expect(variation.headline).to.be.a('string');",
+                  "        pm.expect(variation.description).to.be.a('string');",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/ai/generate-ad-copy",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"industry\": \"Technology\",\n    \"product\": \"Enterprise SaaS Platform\",\n    \"targetAudience\": \"IT Decision Makers\",\n    \"keyBenefits\": [\"Increased Productivity\", \"Cost Savings\", \"Scalability\"],\n    \"platform\": \"linkedin\",\n    \"variations\": 3\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Platform Integration",
+      "item": [
+        {
+          "name": "Sync LinkedIn Campaign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('LinkedIn sync is successful', function() {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.equal('success');",
+                  "    pm.expect(jsonData.platformCampaignId).to.be.a('string');",
+                  "});",
+                  "",
+                  "pm.test('Rate limits are tracked', function() {",
+                  "    pm.expect(pm.response.headers.get('X-LinkedIn-RateLimit-Remaining')).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "X-LinkedIn-API-Key",
+                "value": "{{linkedInApiKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/{{apiVersion}}/integration/linkedin/campaigns/{{campaignId}}/sync"
+          }
+        }
+      ]
+    }
+  ]
+}
