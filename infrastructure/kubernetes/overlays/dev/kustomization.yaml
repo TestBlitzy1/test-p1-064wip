@@ -1,0 +1,81 @@
+# Kustomize configuration for development environment overlay
+# Version: kustomize 5.0+
+# Purpose: Development environment specific customizations for Sales Intelligence Platform
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Reference the base configuration
+bases:
+  - ../../base
+
+# Target namespace for all resources
+namespace: sales-intelligence-dev
+
+# Common labels applied to all resources
+commonLabels:
+  environment: development
+  app: sales-intelligence-platform
+
+# Common annotations for all resources
+commonAnnotations:
+  environment.type: development
+  deployment.environment: dev
+  contact.team: platform-engineering
+
+# Resource patches for development environment
+patches:
+  # Set development-appropriate resource limits and replicas for all deployments
+  - target:
+      kind: Deployment
+      name: ".*"
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: placeholder
+      spec:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: ".*"
+                resources:
+                  requests:
+                    cpu: "0.5"
+                    memory: "1Gi"
+                  limits:
+                    cpu: "1"
+                    memory: "2Gi"
+
+# ConfigMap generation for development environment
+configMapGenerator:
+  - name: dev-environment-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - API_DEBUG=true
+      - ENABLE_SWAGGER=true
+
+# Secret generation for development credentials
+secretGenerator:
+  - name: dev-credentials
+    behavior: merge
+    envs:
+      - dev.env
+
+# Image tag configuration for development
+images:
+  - name: sales-intelligence-backend
+    newTag: dev
+  - name: sales-intelligence-frontend
+    newTag: dev
+  - name: sales-intelligence-ai
+    newTag: dev
+
+# Resource transformers configuration
+transformers: []
+
+# Validation configurations
+configurations: []
