@@ -1,0 +1,157 @@
+# Artillery load testing configuration for Sales Intelligence Platform
+# Dependencies:
+# artillery-plugin-expect: ^2.3.1
+# artillery-plugin-metrics-by-endpoint: ^1.0.2
+# artillery-plugin-publish-metrics: ^2.0.0
+
+config:
+  plugins:
+    expect:
+      outputFormat: "json"
+      strict: true
+      handleErrors: true
+    metrics-by-endpoint:
+      provider: "datadog"
+      tags: ["service:sales-intelligence"]
+    publish-metrics:
+      type: "datadog"
+      apiKey: "${DATADOG_API_KEY}"
+      tags: ["env:${ENV}", "service:sales-intelligence"]
+      prefix: "load_test"
+
+  environments:
+    development:
+      target: "http://localhost:8000"
+      phases:
+        - duration: 60
+          arrivalRate: 5
+          rampTo: 20
+          name: "Development load"
+
+    staging:
+      target: "https://staging-api.example.com"
+      phases:
+        - duration: 300
+          arrivalRate: 10
+          rampTo: 50
+          name: "Staging load"
+
+    production:
+      target: "https://api.example.com"
+      phases:
+        - duration: 600
+          arrivalRate: 50
+          rampTo: 200
+          name: "Production load"
+
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Accept: "application/json"
+      X-API-Version: "1.0"
+    timeout: 30000
+    maxRetries: 3
+    retryDelay: 1000
+
+  processor: "./processors/data-processor.js"
+
+before:
+  flow:
+    - function: "beforeEngine"
+      weight: 1
+
+after:
+  flow:
+    - function: "afterEngine"
+      weight: 1
+
+scenarios:
+  # Campaign Management Scenarios - 40% of traffic
+  - name: "campaign_flows"
+    weight: 40
+    flow: "{{ campaign_flows.scenarios }}"
+
+  # Analytics Scenarios - 35% of traffic
+  - name: "analytics_flows"
+    weight: 35
+    flow: "{{ analytics_flows.scenarios }}"
+
+  # Audience Targeting Scenarios - 25% of traffic
+  - name: "audience_flows"
+    weight: 25
+    flow: "{{ audience_flows.scenarios }}"
+
+functions:
+  beforeEngine: |
+    module.exports = function(context, events, done) {
+      // Initialize environment variables
+      const env = process.env.NODE_ENV || 'development';
+      context.vars.environment = env;
+      
+      // Setup Datadog monitoring
+      context.vars.datadogTags = [
+        `env:${env}`,
+        'service:sales-intelligence',
+        'test_type:load'
+      ];
+      
+      // Initialize test data generators
+      context.vars.campaignData = require('./data/campaign-data.js');
+      context.vars.audienceData = require('./data/audience-data.js');
+      
+      // Verify API accessibility
+      const healthCheck = {
+        method: 'GET',
+        url: '/health',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      // Clear previous test metrics
+      context.vars.metrics = {
+        requests: 0,
+        errors: 0,
+        latencies: []
+      };
+      
+      // Setup error tracking
+      context.on('error', (err) => {
+        context.vars.metrics.errors++;
+        console.error(`Test error: ${err.message}`);
+      });
+      
+      done();
+    }
+
+  afterEngine: |
+    module.exports = function(context, events, done) {
+      // Aggregate test metrics
+      const metrics = context.vars.metrics;
+      const summary = {
+        totalRequests: metrics.requests,
+        errorRate: (metrics.errors / metrics.requests) * 100,
+        avgLatency: metrics.latencies.reduce((a, b) => a + b, 0) / metrics.latencies.length
+      };
+      
+      // Export metrics to Datadog
+      if (process.env.DATADOG_API_KEY) {
+        const StatsD = require('hot-shots');
+        const dogstatsd = new StatsD({
+          prefix: 'load_test.',
+          globalTags: context.vars.datadogTags
+        });
+        
+        dogstatsd.gauge('summary.requests', summary.totalRequests);
+        dogstatsd.gauge('summary.error_rate', summary.errorRate);
+        dogstatsd.gauge('summary.avg_latency', summary.avgLatency);
+      }
+      
+      // Generate test report
+      console.log('Load Test Summary:', JSON.stringify(summary, null, 2));
+      
+      // Cleanup test data
+      context.vars = {};
+      
+      done();
+    }
