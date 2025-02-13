@@ -1,0 +1,191 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+      - 'src/web/**'
+      - 'src/test/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/backend/**'
+      - 'src/web/**'
+      - 'src/test/**'
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+  TEST_ENVIRONMENT: 'integration'
+  TEST_TIMEOUT: '300000'
+  MAX_RETRIES: '3'
+  PARALLEL_TESTS: 'true'
+  HEALTH_CHECK_INTERVAL: '10'
+  CLEANUP_TIMEOUT: '120'
+
+jobs:
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: test
+    concurrency:
+      group: integration-tests-${{ github.ref }}
+      cancel-in-progress: true
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: test_sales_intelligence
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Cache Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/pip
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/package-lock.json', '**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          npm ci
+
+      - name: Setup Test Environment
+        run: |
+          # Initialize test networks with isolation
+          docker network create test-network || true
+          
+          # Start test containers with health checks
+          docker-compose -f src/test/docker/docker-compose.test.yml up -d
+          
+          # Wait for services to be healthy
+          timeout ${{ env.HEALTH_CHECK_INTERVAL }} bash -c '
+            until docker-compose -f src/test/docker/docker-compose.test.yml ps | grep -q "healthy"; do
+              sleep 1
+            done
+          '
+
+      - name: Run Integration Tests
+        run: |
+          # Set test environment variables
+          export TEST_DB_HOST=localhost
+          export TEST_DB_PORT=5432
+          export TEST_REDIS_HOST=localhost
+          export TEST_REDIS_PORT=6379
+          
+          # Execute tests with comprehensive monitoring
+          npm run test:integration -- \
+            --ci \
+            --runInBand \
+            --coverage \
+            --testTimeout=${{ env.TEST_TIMEOUT }} \
+            --maxWorkers=2 \
+            --forceExit \
+            --detectOpenHandles \
+            --json --outputFile=test-results.json
+
+      - name: Process Test Results
+        if: always()
+        run: |
+          # Generate test report
+          npm run generate-test-report
+          
+          # Collect test metrics
+          echo "::set-output name=test_success::$(jq '.success' test-results.json)"
+          echo "::set-output name=test_coverage::$(jq '.coverage.lines.pct' test-results.json)"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: |
+            coverage/
+            test-results.json
+            test-report.html
+          retention-days: 14
+
+      - name: Upload Test Coverage
+        if: success()
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: integration
+          fail_ci_if_error: true
+
+      - name: Cleanup Test Environment
+        if: always()
+        run: |
+          # Stop and remove test containers
+          docker-compose -f src/test/docker/docker-compose.test.yml down -v
+          
+          # Remove test networks
+          docker network rm test-network || true
+          
+          # Cleanup test artifacts
+          rm -rf tmp/* || true
+          
+          # Archive test logs
+          mkdir -p test-logs
+          mv logs/* test-logs/ || true
+          
+          # Verify cleanup completion
+          timeout ${{ env.CLEANUP_TIMEOUT }} bash -c '
+            until [ -z "$(docker ps -q)" ]; do
+              sleep 1
+            done
+          '
+
+      - name: Check Test Results
+        if: always()
+        run: |
+          if [ "${{ steps.process-results.outputs.test_success }}" != "true" ]; then
+            echo "Integration tests failed"
+            exit 1
+          fi
