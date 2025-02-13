@@ -1,0 +1,132 @@
+config:
+  target: "{{ $processEnvironment.API_URL }}"
+  http:
+    timeout: 30
+  # Import custom processor for data generation
+  processor: "./campaign-data-generator.js"
+  
+  # Environment-specific configurations
+  environments:
+    development:
+      target: "http://localhost:8000"
+      phases:
+        - duration: 60
+          arrivalRate: 5
+    
+    staging:
+      target: "https://api-staging.example.com"
+      phases:
+        - duration: 300
+          arrivalRate: 10
+          rampTo: 50
+    
+    production:
+      target: "https://api.example.com"
+      phases:
+        - duration: 600
+          arrivalRate: 50
+          rampTo: 200
+  
+  # Default request settings
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Accept: "application/json"
+    timeouts:
+      request: 30000
+
+# Test scenarios
+scenarios:
+  # Campaign Creation Flow (40% of traffic)
+  - name: "campaign_creation_flow"
+    weight: 40
+    flow:
+      # Create new campaign
+      - post:
+          url: "/api/campaigns"
+          beforeRequest: "generateCampaignData"
+          afterResponse: "validateCampaignResponse"
+          expect:
+            - statusCode: 201
+            - contentType: "application/json"
+            - maxResponseTime: 30000  # 30s SLA requirement
+      
+      # Simulate user think time
+      - think: 2
+      
+      # Verify campaign creation
+      - get:
+          url: "/api/campaigns/{{ id }}"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+
+  # Campaign Update Flow (30% of traffic)
+  - name: "campaign_update_flow"
+    weight: 30
+    flow:
+      # Update campaign settings
+      - put:
+          url: "/api/campaigns/{{ id }}"
+          json:
+            total_budget: "{{ $randomNumber(5000, 100000) }}"
+            targeting_settings:
+              locations: ["US", "UK", "CA"]
+              industries: ["Technology", "SaaS"]
+          expect:
+            - statusCode: 200
+            - maxResponseTime: 15000
+
+  # Campaign Monitoring Flow (30% of traffic)
+  - name: "campaign_monitoring_flow"
+    weight: 30
+    flow:
+      # Get campaign performance metrics
+      - get:
+          url: "/api/campaigns/{{ id }}/performance"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - maxResponseTime: 5000
+      
+      # Simulate monitoring interval
+      - think: 1
+      
+      # Update campaign status
+      - patch:
+          url: "/api/campaigns/{{ id }}/status"
+          json:
+            status: "{{ $randomString(['active', 'paused']) }}"
+          expect:
+            - statusCode: 200
+
+# Custom Functions (implemented in campaign-data-generator.js)
+functions:
+  generateCampaignData:
+    - function: "generateTestCampaign"
+      weight: 1
+  
+  validateCampaignResponse:
+    - function: "validateResponse"
+      weight: 1
+
+# Variables for data generation
+variables:
+  platforms:
+    - "linkedin"
+    - "google"
+    - "both"
+  industries:
+    - "Technology"
+    - "SaaS"
+    - "Marketing"
+    - "Finance"
+  locations:
+    - "US"
+    - "UK"
+    - "CA"
+    - "AU"
+  campaign_types:
+    - "awareness"
+    - "consideration"
+    - "conversion"
