@@ -1,0 +1,125 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base resources to be customized
+resources:
+- ../../base/namespace.yaml
+- ../../base/configmap.yaml
+- ../../base/secrets.yaml
+
+# Target namespace for all resources
+namespace: sales-intelligence-staging
+
+# Common labels to be added to all resources
+commonLabels:
+  environment: staging
+  app: sales-intelligence-platform
+  version: latest
+  managed-by: kustomize
+
+# Common annotations for all resources
+commonAnnotations:
+  environment: staging
+  team: platform-engineering
+  contact: platform-team@sales-intelligence.com
+  purpose: integration-testing
+  tier: staging
+
+# Replica count specifications for deployments
+replicas:
+- name: frontend-deployment
+  count: 2
+- name: backend-deployment
+  count: 2
+- name: ai-service-deployment
+  count: 2
+
+# Image tag overrides for staging environment
+images:
+- name: sales-intelligence-frontend
+  newName: sales-intelligence-frontend
+  newTag: staging
+- name: sales-intelligence-backend
+  newName: sales-intelligence-backend
+  newTag: staging
+- name: sales-intelligence-ai
+  newName: sales-intelligence-ai
+  newTag: staging
+
+# ConfigMap generators for staging-specific configurations
+configMapGenerator:
+- name: staging-config
+  behavior: merge
+  literals:
+  - ENVIRONMENT=staging
+  - LOG_LEVEL=DEBUG
+  - ENABLE_DEBUGGING=true
+  - API_TIMEOUT=60
+  - RATE_LIMIT_MAX_REQUESTS=200
+  - METRICS_RETENTION_DAYS=30
+  - MODEL_BATCH_SIZE=16
+  - INFERENCE_WORKERS=2
+
+# Secret generators for staging environment
+secretGenerator:
+- name: staging-secrets
+  behavior: merge
+  type: Opaque
+  envs:
+  - staging-secrets.env
+
+# Strategic merge patches for resource customization
+patchesStrategicMerge:
+# Resource limits patch
+- |-
+  apiVersion: v1
+  kind: ResourceQuota
+  metadata:
+    name: backend-quota
+    namespace: sales-intelligence-backend
+  spec:
+    hard:
+      requests.cpu: "4"
+      requests.memory: 8Gi
+      limits.cpu: "8"
+      limits.memory: 16Gi
+      pods: "20"
+
+# HPA configuration patch
+- |-
+  apiVersion: autoscaling/v2
+  kind: HorizontalPodAutoscaler
+  metadata:
+    name: backend-hpa
+  spec:
+    minReplicas: 2
+    maxReplicas: 4
+    metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+# Ingress configuration patch
+- |-
+  apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: staging-ingress
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  spec:
+    rules:
+    - host: staging.sales-intelligence.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: frontend-service
+              port:
+                number: 80
