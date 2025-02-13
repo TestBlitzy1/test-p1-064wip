@@ -1,0 +1,95 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base configuration to extend
+bases:
+  - ../../base
+
+# Production namespace
+namespace: sales-intelligence-prod
+
+# Common labels for all resources
+commonLabels:
+  environment: production
+  app: sales-intelligence-platform
+  region: multi-region
+  compliance: soc2-compliant
+
+# Common annotations for all resources
+commonAnnotations:
+  environment.type: production
+  deployment.region: multi-region
+  monitoring.enabled: "true"
+  backup.enabled: "true"
+  security.compliance: soc2,gdpr
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+
+# Additional resources specific to production
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - network-policies.yaml
+  - pod-disruption-budget.yaml
+
+# Production-specific patches
+patches:
+  # High availability and resource configuration patch for all deployments
+  - target:
+      kind: Deployment
+      name: ".*"
+    patch:
+      spec:
+        replicas: 3
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: "25%"
+            maxUnavailable: "25%"
+        template:
+          spec:
+            containers:
+              - name: ".*"
+                resources:
+                  requests:
+                    cpu: "1"
+                    memory: "2Gi"
+                  limits:
+                    cpu: "2"
+                    memory: "4Gi"
+                securityContext:
+                  runAsNonRoot: true
+                  readOnlyRootFilesystem: true
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: DoNotSchedule
+
+# ConfigMap generators for service configurations
+configMapGenerator:
+  - name: backend-service-config
+    behavior: merge
+    literals:
+      - API_WORKERS=8
+      - RATE_LIMIT_MAX_REQUESTS=150
+      - LOG_LEVEL=INFO
+      - MONITORING_ENABLED=true
+      - TRACING_ENABLED=true
+  - name: ai-service-config
+    behavior: merge
+    literals:
+      - INFERENCE_WORKERS=4
+      - GPU_MEMORY_FRACTION=0.9
+      - MODEL_CACHE_SIZE=2048
+      - MONITORING_ENABLED=true
+      - ERROR_REPORTING_LEVEL=WARNING
+
+# Production image configurations
+images:
+  - name: sales-intelligence-backend
+    newTag: stable
+  - name: sales-intelligence-frontend
+    newTag: stable
+  - name: sales-intelligence-ai
+    newTag: stable
