@@ -1,0 +1,221 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run tests against'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '18.x'
+  PYTHON_VERSION: '3.11'
+  SCAN_TIMEOUT: '120m'
+  RETRY_ATTEMPTS: '3'
+  FAILURE_THRESHOLD: 'critical'
+
+jobs:
+  setup-environment:
+    name: Setup Security Testing Environment
+    runs-on: ubuntu-latest
+    outputs:
+      matrix-config: ${{ steps.set-matrix.outputs.matrix }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          pip install -r requirements-security.txt
+
+      - name: Set scan matrix
+        id: set-matrix
+        run: |
+          echo "matrix={\"scan-type\":[\"static\",\"dynamic\",\"dependency\",\"container\"]}" >> $GITHUB_OUTPUT
+
+  static-analysis:
+    name: Static Security Analysis
+    needs: setup-environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript, python
+          queries: security-extended,security-and-quality
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+        with:
+          category: "/language:javascript,python"
+
+  dependency-scan:
+    name: Dependency Security Scan
+    needs: setup-environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.12.0
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  penetration-test:
+    name: API Penetration Testing
+    needs: setup-environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup test environment
+        run: |
+          npm ci
+          npm run build
+          npm run start:test &
+          sleep 10
+
+      - name: Run OWASP ZAP scan
+        uses: zaproxy/action-baseline@v0.9.0
+        with:
+          target: 'http://localhost:3000'
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a'
+
+      - name: Run API security tests
+        run: |
+          npm run test:security:api
+          npm run test:security:auth
+          npm run test:security:data
+
+      - name: Generate security report
+        if: always()
+        run: |
+          npm run security:report
+          
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            reports/security/*.html
+            reports/security/*.json
+
+  compliance-validation:
+    name: Compliance Validation
+    needs: setup-environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup test environment
+        run: |
+          npm ci
+          npm run build:test
+
+      - name: Run GDPR compliance tests
+        run: |
+          npm run test:compliance:gdpr
+          npm run test:compliance:data-protection
+
+      - name: Validate security controls
+        run: |
+          npm run test:security:controls
+          npm run test:security:encryption
+
+      - name: Generate compliance report
+        if: always()
+        run: |
+          npm run compliance:report
+
+      - name: Upload compliance reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-reports
+          path: reports/compliance/*.pdf
+
+  security-report:
+    name: Generate Security Report
+    needs: [static-analysis, dependency-scan, penetration-test, compliance-validation]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Generate consolidated report
+        run: |
+          npm run security:report:consolidate
+          
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v3
+        with:
+          name: consolidated-security-report
+          path: reports/consolidated-security-report.pdf
+
+      - name: Check for critical vulnerabilities
+        if: ${{ job.status == 'success' }}
+        run: |
+          if grep -q "CRITICAL" reports/consolidated-security-report.pdf; then
+            echo "Critical vulnerabilities found!"
+            exit 1
+          fi
+
+      - name: Notify security team
+        if: failure()
+        run: |
+          curl -X POST ${SECURITY_WEBHOOK_URL} \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"Security scan failed - Critical vulnerabilities found!"}'
+        env:
+          SECURITY_WEBHOOK_URL: ${{ secrets.SECURITY_WEBHOOK_URL }}
