@@ -1,0 +1,136 @@
+# Artillery load testing scenarios for analytics service endpoints
+# @faker-js/faker ^8.0.0 - Generate realistic test data
+# moment ^2.29.4 - Handle date calculations
+
+config:
+  environments:
+    development:
+      target: "http://localhost:3000"
+      phases:
+        - duration: 60
+          arrivalRate: 5
+          rampTo: 50
+          name: "Development load test"
+    
+    staging:
+      target: "https://staging-api.example.com" 
+      phases:
+        - duration: 300
+          arrivalRate: 10
+          rampTo: 100
+          name: "Staging load test"
+  
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      Accept: "application/json"
+      X-Test-Source: "artillery"
+    timeout: 10000
+
+# Test data constants
+time_periods:
+  - "daily"
+  - "weekly"
+  - "monthly"
+  - "quarterly" 
+  - "custom"
+
+report_formats:
+  - "pdf"
+  - "csv"
+  - "excel"
+  - "json"
+
+date_ranges:
+  - "last_7_days"
+  - "last_30_days"
+  - "last_90_days"
+  - "custom"
+
+# Before scenario hook for setup
+beforeScenario: |
+  const { faker } = require('@faker-js/faker');
+  const moment = require('moment');
+  
+  // Generate test campaign ID
+  context.vars.campaignId = faker.string.uuid();
+  
+  // Set up test context
+  context.vars.userId = faker.string.uuid();
+  context.vars.sessionId = faker.string.alphanumeric(32);
+  
+  // Initialize performance monitoring
+  context.vars.scenarioStartTime = Date.now();
+  context.vars.errors = [];
+
+# After scenario hook for cleanup
+afterScenario: |
+  // Calculate scenario duration
+  const duration = Date.now() - context.vars.scenarioStartTime;
+  
+  // Log execution metrics
+  console.log(`Scenario completed in ${duration}ms`);
+  if (context.vars.errors.length > 0) {
+    console.error('Scenario errors:', context.vars.errors);
+  }
+  
+  // Reset context
+  delete context.vars.scenarioStartTime;
+  delete context.vars.errors;
+
+scenarios:
+  # Campaign metrics load testing - 40% of traffic
+  campaign_metrics_load:
+    weight: 40
+    flow:
+      - get:
+          url: "/analytics/{{campaignId}}/metrics"
+          qs:
+            time_period: "{{ $randomItem time_periods }}"
+            metrics:
+              - "ctr"
+              - "roas"
+              - "conversions"
+              - "spend"
+              - "impressions"
+          expect:
+            - "statusCode equals 200"
+            - "hasProperty 'metrics'"
+            - "hasHeader 'x-response-time'"
+
+  # Performance trends load testing - 35% of traffic
+  performance_trends_load:
+    weight: 35
+    flow:
+      - get:
+          url: "/analytics/{{campaignId}}/trends"
+          qs:
+            metrics:
+              - "ctr"
+              - "roas"
+              - "cpc"
+            time_period: "monthly"
+            comparison: "previous_period"
+          expect:
+            - "statusCode equals 200"
+            - "hasProperty 'trends'"
+            - "hasProperty 'analysis'"
+            - "hasHeader 'x-response-time'"
+
+  # Report generation load testing - 25% of traffic
+  report_generation_load:
+    weight: 25
+    flow:
+      - post:
+          url: "/analytics/{{campaignId}}/reports"
+          json:
+            format: "{{ $randomItem report_formats }}"
+            metrics: ["all"]
+            date_range: "{{ $randomItem date_ranges }}"
+            include_trends: true
+            include_recommendations: true
+          expect:
+            - "statusCode equals 200"
+            - "hasProperty 'report_url'"
+            - "hasProperty 'report_id'"
+            - "hasHeader 'x-response-time'"
