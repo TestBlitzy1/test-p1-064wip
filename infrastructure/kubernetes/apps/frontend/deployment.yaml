@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: sales-intelligence-frontend
+  labels:
+    app: sales-intelligence-platform
+    component: frontend
+    environment: production
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+    prometheus.io/path: "/metrics"
+    description: "Frontend deployment for Sales Intelligence Platform"
+    team: platform-engineering
+    contact: platform-team@company.com
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sales-intelligence-platform
+      component: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sales-intelligence-platform
+        component: frontend
+      annotations:
+        checksum/auth0-config: "${AUTH0_CONFIG_CHECKSUM}"
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+      containers:
+      - name: frontend
+        image: sales-intelligence/frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: AUTH0_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              name: auth0-credentials
+              key: AUTH0_DOMAIN
+        - name: AUTH0_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: auth0-credentials
+              key: AUTH0_CLIENT_ID
+        - name: AUTH0_AUDIENCE
+          valueFrom:
+            secretKeyRef:
+              name: auth0-credentials
+              key: AUTH0_AUDIENCE
+        - name: AUTH0_CALLBACK_URL
+          valueFrom:
+            secretKeyRef:
+              name: auth0-credentials
+              key: AUTH0_CALLBACK_URL
+        resources:
+          requests:
+            cpu: "0.5"
+            memory: "1Gi"
+          limits:
+            cpu: "1"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/.next/cache
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: sales-intelligence-platform
+                  component: frontend
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: sales-intelligence-platform
+            component: frontend
+      terminationGracePeriodSeconds: 30
