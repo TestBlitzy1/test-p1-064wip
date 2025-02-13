@@ -1,0 +1,96 @@
+version: '1.47'
+
+environment:
+  # Storage configuration
+  SPAN_STORAGE_TYPE: memory
+  COLLECTOR_ZIPKIN_HOST_PORT: :9411
+  MEMORY_MAX_TRACES: '50000'
+  QUERY_BASE_PATH: /jaeger
+  SAMPLING_STRATEGIES_FILE: /etc/jaeger/sampling/sampling.json
+  METRICS_STORAGE_TYPE: prometheus
+  LOG_LEVEL: info
+
+# Sampling configuration for different services
+sampling:
+  default_strategy:
+    type: probabilistic
+    param: 1.0
+  service_strategies:
+    # Campaign service sampling
+    - service: campaign_service
+      type: probabilistic
+      param: 1.0
+      operation_strategies:
+        - operation: /api/campaigns/*
+          type: probabilistic
+          param: 1.0
+    
+    # AI service sampling
+    - service: ai_service
+      type: probabilistic
+      param: 1.0
+      operation_strategies:
+        - operation: /api/ai/predict
+          type: probabilistic
+          param: 1.0
+    
+    # Analytics service sampling (reduced rate)
+    - service: analytics_service
+      type: probabilistic
+      param: 0.5
+      operation_strategies:
+        - operation: /api/analytics/reports
+          type: probabilistic
+          param: 0.5
+
+# Port configurations
+ports:
+  query: 16686
+  collector: 14250
+  agent: 6831
+  admin: 14269
+  zipkin: 9411
+  metrics: 14269
+
+# Metrics configuration
+metrics:
+  backend: prometheus
+  host_port: :14269
+  tags:
+    - key: environment
+      value: ${ENV:production}
+    - key: service
+      value: jaeger
+    - key: deployment
+      value: ${DEPLOYMENT_ID}
+    - key: region
+      value: ${AWS_REGION}
+  prometheus:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+
+# Logging configuration
+logging:
+  level: info
+  format: json
+  fields:
+    - timestamp
+    - level
+    - message
+    - caller
+
+# Storage configuration
+storage:
+  type: memory
+  options:
+    max_traces: 50000
+    memory_max_bytes: '1073741824'  # 1GB memory limit
+
+# Health check configuration
+health_check:
+  http:
+    port: 16686
+    path: /
+    interval: 30s
+    timeout: 5s
+    retries: 3
