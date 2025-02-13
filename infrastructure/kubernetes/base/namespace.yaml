@@ -1,0 +1,246 @@
+---
+# Backend Services Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sales-intelligence-backend
+  labels:
+    name: backend
+    component: backend
+    app: sales-intelligence-platform
+    environment: ${ENV}
+    managed-by: platform-team
+  annotations:
+    description: "Backend services namespace for Sales Intelligence Platform"
+    team: platform-engineering
+    contact: platform-team@company.com
+    security-level: restricted
+    backup-policy: daily
+---
+# Frontend Services Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sales-intelligence-frontend
+  labels:
+    name: frontend
+    component: frontend
+    app: sales-intelligence-platform
+    environment: ${ENV}
+    managed-by: platform-team
+  annotations:
+    description: "Frontend services namespace for Sales Intelligence Platform"
+    team: platform-engineering
+    contact: platform-team@company.com
+    security-level: restricted
+    backup-policy: daily
+---
+# AI Services Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sales-intelligence-ai
+  labels:
+    name: ai-services
+    component: ai
+    app: sales-intelligence-platform
+    environment: ${ENV}
+    managed-by: platform-team
+  annotations:
+    description: "AI services namespace for Sales Intelligence Platform"
+    team: platform-engineering
+    contact: platform-team@company.com
+    security-level: restricted
+    backup-policy: daily
+    gpu-enabled: "true"
+---
+# Monitoring Services Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sales-intelligence-monitoring
+  labels:
+    name: monitoring
+    component: monitoring
+    app: sales-intelligence-platform
+    environment: ${ENV}
+    managed-by: platform-team
+  annotations:
+    description: "Monitoring services namespace for Sales Intelligence Platform"
+    team: platform-engineering
+    contact: platform-team@company.com
+    security-level: restricted
+    backup-policy: daily
+    retention-period: 30d
+---
+# Resource Quota for Backend Namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: backend-quota
+  namespace: sales-intelligence-backend
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "50"
+    configmaps: "100"
+    secrets: "100"
+    persistentvolumeclaims: "20"
+---
+# Resource Quota for Frontend Namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: frontend-quota
+  namespace: sales-intelligence-frontend
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "50"
+    configmaps: "100"
+    secrets: "100"
+    persistentvolumeclaims: "20"
+---
+# Resource Quota for AI Services Namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ai-services-quota
+  namespace: sales-intelligence-ai
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "50"
+    configmaps: "100"
+    secrets: "100"
+    persistentvolumeclaims: "20"
+---
+# Resource Quota for Monitoring Namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-quota
+  namespace: sales-intelligence-monitoring
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "50"
+    configmaps: "100"
+    secrets: "100"
+    persistentvolumeclaims: "20"
+---
+# LimitRange for Backend Namespace
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: backend-limits
+  namespace: sales-intelligence-backend
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: 4Gi
+    defaultRequest:
+      cpu: "0.5"
+      memory: 512Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi
+    default:
+      storage: 5Gi
+    defaultRequest:
+      storage: 1Gi
+---
+# LimitRange for Frontend Namespace
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: frontend-limits
+  namespace: sales-intelligence-frontend
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: 4Gi
+    defaultRequest:
+      cpu: "0.5"
+      memory: 512Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi
+    default:
+      storage: 5Gi
+    defaultRequest:
+      storage: 1Gi
+---
+# LimitRange for AI Services Namespace
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ai-services-limits
+  namespace: sales-intelligence-ai
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: 4Gi
+    defaultRequest:
+      cpu: "0.5"
+      memory: 512Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi
+    default:
+      storage: 5Gi
+    defaultRequest:
+      storage: 1Gi
+---
+# LimitRange for Monitoring Namespace
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: monitoring-limits
+  namespace: sales-intelligence-monitoring
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: 4Gi
+    defaultRequest:
+      cpu: "0.5"
+      memory: 512Mi
+    max:
+      cpu: "4"
+      memory: 8Gi
+  - type: PersistentVolumeClaim
+    max:
+      storage: 10Gi
+    default:
+      storage: 5Gi
+    defaultRequest:
+      storage: 1Gi
