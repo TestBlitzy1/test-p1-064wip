@@ -1,0 +1,185 @@
+name: Frontend CI
+
+# Trigger workflow on push/PR to main and develop branches
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Prevent concurrent workflow runs on same ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '18.x'
+  NEXT_TELEMETRY_DISABLED: 1
+  CI: true
+
+jobs:
+  validate:
+    name: Code Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        id: npm-cache
+        with:
+          path: |
+            ~/.npm
+            node_modules/.cache
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+        working-directory: src/web
+
+      - name: Run TypeScript type checking
+        run: npm run type-check
+        working-directory: src/web
+
+      - name: Run ESLint
+        run: npm run lint
+        working-directory: src/web
+
+      - name: Check code formatting
+        run: npx prettier --check "src/**/*.{ts,tsx,js,jsx,json,css}"
+        working-directory: src/web
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        id: npm-cache
+        with:
+          path: |
+            ~/.npm
+            node_modules/.cache
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+        working-directory: src/web
+
+      - name: Run Jest tests with coverage
+        run: npm run test:coverage -- --ci --maxWorkers=4
+        working-directory: src/web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: src/web/coverage
+          retention-days: 14
+
+      - name: Check coverage thresholds
+        run: |
+          COVERAGE_FAILED=0
+          COVERAGE_FILE="src/web/coverage/coverage-summary.json"
+          
+          if [ ! -f "$COVERAGE_FILE" ]; then
+            echo "Coverage report not found!"
+            exit 1
+          fi
+          
+          BRANCHES=$(jq '.total.branches.pct' "$COVERAGE_FILE")
+          FUNCTIONS=$(jq '.total.functions.pct' "$COVERAGE_FILE")
+          LINES=$(jq '.total.lines.pct' "$COVERAGE_FILE")
+          STATEMENTS=$(jq '.total.statements.pct' "$COVERAGE_FILE")
+          
+          [ "$BRANCHES" -lt 80 ] && COVERAGE_FAILED=1 && echo "Branch coverage ($BRANCHES%) below threshold (80%)"
+          [ "$FUNCTIONS" -lt 80 ] && COVERAGE_FAILED=1 && echo "Function coverage ($FUNCTIONS%) below threshold (80%)"
+          [ "$LINES" -lt 80 ] && COVERAGE_FAILED=1 && echo "Line coverage ($LINES%) below threshold (80%)"
+          [ "$STATEMENTS" -lt 80 ] && COVERAGE_FAILED=1 && echo "Statement coverage ($STATEMENTS%) below threshold (80%)"
+          
+          exit $COVERAGE_FAILED
+
+  build:
+    name: Production Build
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        id: npm-cache
+        with:
+          path: |
+            ~/.npm
+            node_modules/.cache
+            ${{ github.workspace }}/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit
+        working-directory: src/web
+
+      - name: Build Next.js application
+        run: npm run build
+        working-directory: src/web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NODE_ENV: production
+
+      - name: Generate build report
+        run: |
+          echo "Build completed at $(date)" > build-report.txt
+          echo "Commit SHA: ${{ github.sha }}" >> build-report.txt
+          echo "Build number: ${{ github.run_number }}" >> build-report.txt
+          npm list --prod --depth=0 >> build-report.txt
+        working-directory: src/web
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: next-build
+          path: |
+            src/web/.next
+            src/web/build-report.txt
+          retention-days: 14
