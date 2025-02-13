@@ -1,0 +1,139 @@
+config:
+  target: "{{ $processEnvironment.TARGET_URL }}"
+  phases:
+    - duration: 300
+      arrivalRate: 10
+      rampTo: 50
+      name: "Ramp up load"
+    - duration: 600
+      arrivalRate: 50
+      name: "Sustained load"
+  plugins:
+    expect:
+      outputFormat: "json"
+      strict: true
+
+# Import required functions and data
+beforeScenario: |
+  const { createValidAudienceSegment } = require('../../e2e/audience/audience.fixtures');
+  const { mockAudienceSegments } = require('../../mocks/data/audience.mock');
+  const faker = require('faker');
+
+# Custom functions for test data generation and validation
+functions:
+  generateSegmentData:
+    - function: "generateSegmentData"
+      code: |
+        const segment = createValidAudienceSegment({
+          name: faker.company.catchPhrase(),
+          description: faker.company.catchPhrase(),
+          platform: 'linkedin',
+          targetingRules: [
+            {
+              ruleType: 'industry',
+              operator: 'include',
+              criteria: {
+                industries: ['Technology', 'SaaS'],
+                includeSubsidiaries: true
+              },
+              weight: 0.8,
+              isActive: true
+            },
+            {
+              ruleType: 'company_size',
+              operator: 'between',
+              criteria: {
+                minSize: 50,
+                maxSize: 1000
+              },
+              weight: 0.6,
+              isActive: true
+            }
+          ]
+        });
+        return segment;
+
+  validateSegmentResponse:
+    - function: "validateSegmentResponse"
+      code: |
+        const response = arguments[0];
+        if (response.statusCode !== 201 && response.statusCode !== 200) {
+          return false;
+        }
+        const segment = response.body.data;
+        return segment.id && 
+               segment.estimatedReach >= 1000 &&
+               Array.isArray(segment.targetingRules) &&
+               segment.confidence >= 0 &&
+               segment.confidence <= 1;
+
+scenarios:
+  - name: "create_segment"
+    weight: 4
+    flow:
+      - function: "generateSegmentData"
+      - post:
+          url: "/api/v1/audience/segments"
+          json: "{{ $generateSegmentData }}"
+          headers:
+            Content-Type: "application/json"
+            Authorization: "Bearer {{ $processEnvironment.API_TOKEN }}"
+          expect:
+            - statusCode: 201
+            - contentType: "application/json"
+            - hasProperty: "data.id"
+            - hasProperty: "data.estimatedReach"
+            - matchesRegexp:
+                "data.createdAt": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+      - think: 1
+      - function: "validateSegmentResponse"
+        capture:
+          - json: "$.data.id"
+            as: "segmentId"
+
+  - name: "optimize_targeting"
+    weight: 3
+    flow:
+      - get:
+          url: "/api/v1/audience/segments/{{ mockAudienceSegments.techDecisionMakers.id }}"
+          headers:
+            Authorization: "Bearer {{ $processEnvironment.API_TOKEN }}"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+      - think: 2
+      - put:
+          url: "/api/v1/audience/segments/{{ mockAudienceSegments.techDecisionMakers.id }}/optimize"
+          json:
+            targetMetric: "reach"
+            minConfidence: 0.8
+            budgetConstraint: 10000
+          headers:
+            Content-Type: "application/json"
+            Authorization: "Bearer {{ $processEnvironment.API_TOKEN }}"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "data.estimatedReach"
+            - hasProperty: "data.confidence"
+            - expr: "parseInt(response.body.data.estimatedReach) >= 1000"
+
+  - name: "calculate_reach"
+    weight: 5
+    flow:
+      - function: "generateSegmentData"
+      - post:
+          url: "/api/v1/audience/calculate-reach"
+          json:
+            targetingRules: "{{ $generateSegmentData.targetingRules }}"
+            platform: "linkedin"
+          headers:
+            Content-Type: "application/json"
+            Authorization: "Bearer {{ $processEnvironment.API_TOKEN }}"
+          expect:
+            - statusCode: 200
+            - contentType: "application/json"
+            - hasProperty: "data.reach"
+            - hasProperty: "data.confidence"
+            - expr: "parseInt(response.body.data.reach) >= 1000"
+            - maxResponseTime: 100
