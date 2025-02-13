@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: monitoring
+  labels:
+    app: jaeger
+    component: tracing
+    part-of: sales-intelligence-platform
+    managed-by: kubernetes
+  annotations:
+    monitoring.kubernetes.io/description: "Jaeger distributed tracing deployment"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "14269"
+
+spec:
+  # Single replica since this is all-in-one deployment
+  replicas: 1
+  
+  selector:
+    matchLabels:
+      app: jaeger
+      component: tracing
+
+  template:
+    metadata:
+      labels:
+        app: jaeger
+        component: tracing
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "14269"
+
+    spec:
+      # Pod anti-affinity to avoid multiple pods on same node
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - jaeger
+              topologyKey: kubernetes.io/hostname
+
+      # Security context for non-root execution
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      containers:
+      - name: jaeger
+        # jaegertracing/all-in-one:1.47
+        image: jaegertracing/all-in-one:1.47
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - name: query
+          containerPort: 16686
+          protocol: TCP
+        - name: collector
+          containerPort: 14250
+          protocol: TCP
+        - name: agent
+          containerPort: 6831
+          protocol: UDP
+        - name: admin
+          containerPort: 14269
+          protocol: TCP
+        - name: zipkin
+          containerPort: 9411
+          protocol: TCP
+
+        env:
+        - name: COLLECTOR_ZIPKIN_HOST_PORT
+          value: ":9411"
+        - name: MEMORY_MAX_TRACES
+          value: "50000"
+        - name: QUERY_BASE_PATH
+          value: "/jaeger"
+        - name: SPAN_STORAGE_TYPE
+          value: "memory"
+        - name: SAMPLING_STRATEGIES_FILE
+          value: "/etc/jaeger/sampling.json"
+
+        # Resource limits and requests
+        resources:
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+          requests:
+            cpu: "500m" 
+            memory: "1Gi"
+
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 16686
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Liveness probe  
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 16686
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        volumeMounts:
+        - name: jaeger-sampling-config
+          mountPath: /etc/jaeger
+          readOnly: true
+
+      volumes:
+      - name: jaeger-sampling-config
+        configMap:
+          name: jaeger-sampling-config
+          optional: true
+
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
