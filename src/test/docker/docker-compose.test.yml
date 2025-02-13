@@ -1,0 +1,152 @@
+version: '3.8'
+
+# Project name and environment variables
+x-project-name: &project-name
+  COMPOSE_PROJECT_NAME: sales-intelligence-test
+
+x-environment: &environment
+  TEST_ENVIRONMENT: test
+  LOG_LEVEL: debug
+
+# Common service configurations
+x-service-defaults: &service-defaults
+  restart: "no"
+  networks:
+    - test-network
+
+services:
+  # Main test service
+  test:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      - NODE_ENV=test
+      - TEST_DB_HOST=postgres
+      - TEST_DB_PORT=5432
+      - TEST_REDIS_HOST=redis
+      - TEST_REDIS_PORT=6379
+      - TEST_KAFKA_BROKERS=kafka:9092
+      - LOG_LEVEL=debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      - .:/app/test
+      - /app/test/node_modules
+    mem_limit: 2g
+    cpu_shares: 1024
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # PostgreSQL database service
+  postgres:
+    <<: *service-defaults
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=test_db
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+      - POSTGRES_MAX_CONNECTIONS=200
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    mem_limit: 1g
+    cpu_shares: 512
+
+  # Redis cache service
+  redis:
+    <<: *service-defaults
+    image: redis:7.0-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - redis-test-data:/data
+    mem_limit: 512m
+    cpu_shares: 256
+
+  # Zookeeper service for Kafka
+  zookeeper:
+    <<: *service-defaults
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+      - ZOOKEEPER_SYNC_LIMIT=2
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+    cpu_shares: 256
+
+  # Kafka message broker service
+  kafka:
+    <<: *service-defaults
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_LOG_RETENTION_HOURS=24
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    mem_limit: 1g
+    cpu_shares: 512
+
+networks:
+  test-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres-test-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /tmp/postgres-test-data
+      o: bind
+  redis-test-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /tmp/redis-test-data
+      o: bind
