@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: monitoring
+    part-of: sales-intelligence-platform
+    tier: monitoring
+  annotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '9090'
+    service.beta.kubernetes.io/aws-load-balancer-internal: 'true'
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: 'http'
+    kubernetes.io/description: 'Prometheus monitoring service for metrics collection'
+    monitoring.kubernetes.io/component: 'metrics'
+    monitoring.kubernetes.io/scrape-interval: '15s'
+
+spec:
+  # Select pods with matching labels from prometheus deployment
+  selector:
+    app: prometheus
+    component: monitoring
+
+  # Define the service ports
+  ports:
+    - name: prometheus-metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+
+  # Use ClusterIP for internal access
+  type: ClusterIP
+
+  # Disable session affinity as Prometheus is stateless
+  sessionAffinity: None
+
+  # Don't publish endpoints for pods not ready
+  publishNotReadyAddresses: false
+
+  # Configure internal traffic policy
+  internalTrafficPolicy: Cluster
